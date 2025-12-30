@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JS Visualizer Playground</title>
+  <link rel="stylesheet" href="/src/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@400;600;700&display=swap"
+    rel="stylesheet">
+</head>
+
+<body>
+  <header>
+    <h1>JS Visualizer Playground</h1>
+    <div class="controls">
+      <button id="run-btn">Run Pipeline</button>
+      <button id="step-btn" class="secondary" disabled>Next Step</button>
+      <button id="reset-btn" class="secondary">Reset</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="card editor">
+      <div class="card-header">
+        <div class="tabs">
+          <button id="tab-html" class="tab-btn secondary">HTML</button>
+          <button id="tab-js" class="tab-btn secondary active">JavaScript</button>
+        </div>
+      </div>
+      <div id="editor-container"></div>
+    </section>
+
+    <section class="card preview">
+      <div class="card-header">
+        <span class="card-title">Live Preview</span>
+      </div>
+      <div id="preview-container">
+        <iframe id="preview-iframe"></iframe>
+      </div>
+    </section>
+
+    <section class="card inspector">
+      <div class="card-header">
+        <span class="card-title">State Inspector</span>
+      </div>
+      <div class="inspector-content" id="inspector-content">
+        <div class="empty-state">Load code to see variables</div>
+      </div>
+    </section>
+
+    <section class="card terminal">
+      <div class="card-header">
+        <span class="card-title">Console Output</span>
+      </div>
+      <div class="terminal-content" id="terminal-content"></div>
+    </section>
+  </main>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+
+</html>
