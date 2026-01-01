@@ -3,40 +3,46 @@ import { JSInterpreter } from './interpreter';
 
 // Initial content
 const initialHTML = `
-<div id="root" style="font-family: sans-serif; padding: 20px; text-align: center;">
-  <h2 style="color: #6366f1;">Score Tracker</h2>
-  <p style="font-size: 24px; font-weight: bold;">Score: <span id="scoreValue">0</span></p>
-  <button id="scoreButton" style="padding: 10px 20px; font-size: 16px; background: #6366f1; color: white; border: none; border-radius: 5px; cursor: pointer;">
-    Add Points
-  </button>
+<div class="slider-container" style="max-width: 500px; margin: auto; overflow: hidden; position: relative;">
+  <div class="img-wrap" style="display: flex; transition: transform 0.5s ease-in-out;">
+    <img class="img" src="https://picsum.photos/id/10/500/300" style="width: 100%; flex-shrink: 0;">
+    <img class="img" src="https://picsum.photos/id/20/500/300" style="width: 100%; flex-shrink: 0;">
+    <img class="img" src="https://picsum.photos/id/30/500/300" style="width: 100%; flex-shrink: 0;">
+  </div>
+  
+  <div style="position: absolute; bottom: 20px; width: 100%; display: flex; justify-content: center; gap: 20px;">
+    <button class="prev" style="padding: 10px; cursor: pointer;">Prev</button>
+    <button class="next" style="padding: 10px; cursor: pointer;">Next</button>
+  </div>
 </div>
 `;
 
 const initialJS = `
-// Grab elements
-const scoreParagraph = document.getElementById('scoreValue');
-const myButton = document.getElementById('scoreButton');
+const prev = document.querySelector('.prev');
+const next = document.querySelector('.next');
+const wrap = document.querySelector('.img-wrap');
+const imgs = document.querySelectorAll('.img-wrap img');
 
-let currentScore = 0;
+let idx = 0;
 
-myButton.addEventListener('click', function() {
-    // 1. Ask for input
-    let userInput = prompt("Enter points to add or subtract:");
-    
-    // 2. Convert and validate
-    let pointsAdded = parseFloat(userInput);
-    
-    if (userInput === null) {
-        return; 
+function showImg() {
+    if (idx >= imgs.length) {
+       idx = 0;
     }
-    
-    if (!isNaN(pointsAdded)) {
-        currentScore += pointsAdded;
-        scoreParagraph.textContent = currentScore;
-        console.log("New local score: " + currentScore);
-    } else {
-        alert("Oops! That wasn't a valid number.");
+    if (idx < 0) {
+       idx = imgs.length - 1;
     }
+    wrap.style.transform = "translateX(-" + (idx * 100) + "%)";
+}
+
+next.addEventListener('click', function() {
+    idx++;
+    showImg();
+});
+
+prev.addEventListener('click', function() {
+    idx--;
+    showImg();
 });
 `;
 
@@ -96,12 +102,16 @@ const stepBtn = document.getElementById('step-btn') as HTMLButtonElement;
 const resetBtn = document.getElementById('reset-btn') as HTMLButtonElement;
 const inspector = document.getElementById('inspector-content')!;
 const terminal = document.getElementById('terminal-content')!;
+const explanationText = document.getElementById('explanation-text')!;
 
 function updateUI() {
   if (!interpreter) return;
   const state = interpreter.getState();
 
-  // Highlight Current Line (only in JS model)
+  // Update Explanation
+  explanationText.innerHTML = state.lastExplanation || "Executing...";
+
+  // Highlight Current Line
   if (editor.getModel() === jsModel) {
     decorationIds = editor.deltaDecorations(decorationIds, [
       {
@@ -135,24 +145,35 @@ function updateUI() {
       ${stack.map((frame, index) => `
         <div class="scope-item">
           <div class="scope-header">Scope: ${frame.functionName || 'Global'}</div>
-          ${Object.entries(frame.scope).map(([key, val]) => `
-            <div class="var-item">
-              <span class="var-name">${key}</span>
-              <span class="var-value">${JSON.stringify(val)}</span>
-            </div>
-          `).join('')}
+          ${Object.entries(frame.scope).map(([key, val]) => {
+    const meta = frame.metadata[key];
+    const kindStr = meta ? `<span style="color: #6366f1; font-size: 0.7rem; margin-right: 5px;">${meta.kind}</span>` : '';
+    const labelStr = meta?.label ? `<span style="color: #94a3b8; font-size: 0.7rem;">(${meta.label})</span>` : '';
+
+    return `
+              <div class="var-item">
+                <div class="var-name">
+                  ${kindStr}
+                  ${key}
+                  ${labelStr}
+                </div>
+                <div class="var-value">${typeof val === 'object' && val !== null ? '{...}' : JSON.stringify(val)}</div>
+              </div>
+            `;
+  }).join('')}
         </div>
       `).reverse().join('')}
     </div>
   `;
 
-  // Update Console
+  // Update Console and scroll to bottom
   terminal.innerHTML = state.logs.map(log => `
     <div class="log-entry">
       <span class="log-prefix">></span>
       <span>${log}</span>
     </div>
   `).join('');
+  terminal.scrollTop = terminal.scrollHeight;
 
   if (state.error) {
     terminal.innerHTML += `
@@ -161,6 +182,7 @@ function updateUI() {
         <span>${state.error}</span>
       </div>
     `;
+    terminal.scrollTop = terminal.scrollHeight;
   }
 
   if (state.isFinished) {
@@ -173,7 +195,6 @@ runBtn.addEventListener('click', () => {
   const code = jsModel.getValue();
   try {
     interpreter = new JSInterpreter(code, previewIframe);
-    // Listen for internal steps to update UI during event callbacks
     interpreter.setOnStep(() => updateUI());
     runBtn.disabled = true;
     stepBtn.disabled = false;
@@ -196,6 +217,7 @@ resetBtn.addEventListener('click', () => {
   decorationIds = editor.deltaDecorations(decorationIds, []);
   inspector.innerHTML = '<div class="empty-state">Load code to see variables</div>';
   terminal.innerHTML = '';
+  explanationText.innerHTML = "Step through the code to see explanations.";
   runBtn.disabled = false;
   stepBtn.disabled = true;
   updatePreview();

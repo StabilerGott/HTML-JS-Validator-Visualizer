@@ -2,8 +2,14 @@ import * as acorn from 'acorn';
 
 export type Scope = Record<string, any>;
 
+export interface VariableMetadata {
+    kind: 'const' | 'let' | 'var' | 'func';
+    label?: string;
+}
+
 export interface ExecutionFrame {
     scope: Scope;
+    metadata: Record<string, VariableMetadata>;
     nodeQueue: any[];
     isFunction: boolean;
     functionName?: string;
@@ -13,10 +19,12 @@ export interface ExecutionFrame {
 export interface ExecutionState {
     stack: ExecutionFrame[];
     globals: Scope;
+    globalMetadata: Record<string, VariableMetadata>;
     logs: string[];
     isFinished: boolean;
     error?: string;
     currentLine: number;
+    lastExplanation: string;
 }
 
 export class JSInterpreter {
@@ -55,22 +63,28 @@ export class JSInterpreter {
             }
         };
 
+        const globalMetadata: Record<string, VariableMetadata> = {};
+
         this.state = {
             stack: [{
                 scope: globals,
+                metadata: globalMetadata,
                 nodeQueue: [...this.ast.body],
                 isFunction: false
             }],
             globals,
+            globalMetadata,
             logs: [],
             isFinished: false,
             currentLine: 1,
+            lastExplanation: "Ready to start.",
         };
 
         // Pre-scan for function declarations
         this.ast.body.forEach((node: any) => {
             if (node.type === 'FunctionDeclaration') {
                 this.state.globals[node.id.name] = node;
+                this.state.globalMetadata[node.id.name] = { kind: 'func' };
             }
         });
     }
@@ -94,6 +108,9 @@ export class JSInterpreter {
             this.state.currentLine = node.loc.start.line;
         }
 
+        // Generate explanation BEFORE executing (since execution might unshift new nodes)
+        this.state.lastExplanation = this.explainNode(node);
+
         try {
             this.executeNode(node, currentFrame);
         } catch (e: any) {
@@ -109,6 +126,85 @@ export class JSInterpreter {
         return this.state;
     }
 
+    private explainNode(node: any): string {
+        if (!node) return "";
+
+        switch (node.type) {
+            case 'VariableDeclaration': {
+                const decl = node.declarations[0];
+                const kind = node.kind; // const, let, var
+                const name = decl.id.name;
+                const valueDesc = this.evaluateSimple(decl.init);
+                return `Create a ${kind} named <strong>${name}</strong>${valueDesc ? ` and set it to ${valueDesc}` : ''}.`;
+            }
+            case 'ExpressionStatement':
+                return this.explainNode(node.expression);
+            case 'AssignmentExpression': {
+                const name = node.left.type === 'Identifier' ? node.left.name : 'property';
+                const op = node.operator === '=' ? 'to be' : 'by';
+                const val = this.evaluateSimple(node.right);
+                return `Update <strong>${name}</strong> ${op} ${val}.`;
+            }
+            case 'CallExpression': {
+                const callee = node.callee;
+                if (callee.type === 'MemberExpression') {
+                    if (callee.object.name === 'document' && callee.property.name === 'getElementById') {
+                        return `Find the HTML element with the ID "<strong>${node.arguments[0].value}</strong>".`;
+                    }
+                    if (callee.object.name === 'document' && callee.property.name === 'querySelector') {
+                        return `Find the first HTML element matching the CSS selector "<strong>${node.arguments[0].value}</strong>".`;
+                    }
+                    if (callee.object.name === 'document' && callee.property.name === 'querySelectorAll') {
+                        return `Find ALL HTML elements matching the selector "<strong>${node.arguments[0].value}</strong>".`;
+                    }
+                    if (callee.property.name === 'addEventListener') {
+                        const event = node.arguments[0].value;
+                        return `Listen for the "<strong>${event}</strong>" event.`;
+                    }
+                }
+                if (callee.name === 'updateCounter') return "Run the <strong>updateCounter</strong> function.";
+                if (callee.name === 'showImg') return "Run the <strong>showImg</strong> function.";
+                if (callee.name === 'prompt') return `Ask the user: "${node.arguments[0].value}"`;
+                if (callee.name === 'alert') return `Show a message: "${node.arguments[0].value}"`;
+                return `Call function <strong>${callee.name || 'anonymous'}</strong>.`;
+            }
+            case 'IfStatement':
+                return `Check if the condition is true.`;
+            case 'ForStatement':
+                return `Start a loop.`;
+            case 'ForLoopCheck':
+                return `Check if the loop should continue.`;
+            case 'ReturnStatement':
+                return `Finish the function and return a value.`;
+            case 'FunctionDeclaration':
+                return `Define a function named <strong>${node.id.name}</strong>.`;
+            case 'UpdateExpression': {
+                const name = node.argument.name;
+                const op = node.operator === '++' ? 'Increase' : 'Decrease';
+                return `${op} <strong>${name}</strong> by 1.`;
+            }
+            default:
+                return `Execute ${node.type}.`;
+        }
+    }
+
+    // Simple evaluator for explanations to avoid side effects
+    private evaluateSimple(node: any): string {
+        if (!node) return "";
+        if (node.type === 'Literal') return `<strong>${JSON.stringify(node.value)}</strong>`;
+        if (node.type === 'Identifier') return `<strong>${node.name}</strong>`;
+        if (node.type === 'CallExpression') {
+            if (node.callee.type === 'MemberExpression' && node.callee.property.name === 'getElementById') {
+                return `element "<strong>${node.arguments[0].value}</strong>"`;
+            }
+            if (node.callee.type === 'MemberExpression' && node.callee.property.name === 'querySelector') {
+                return `element "<strong>${node.arguments[0].value}</strong>"`;
+            }
+            return `result of ${node.callee.name || 'function'}`;
+        }
+        return "...";
+    }
+
     public setOnStep(cb: (state: ExecutionState) => void) {
         this.onStepCallback = cb;
     }
@@ -120,12 +216,17 @@ export class JSInterpreter {
 
     private executeNode(node: any, frame: ExecutionFrame) {
         const scope = frame.scope;
+        const metadata = frame.metadata;
 
         switch (node.type) {
             case 'VariableDeclaration':
                 node.declarations.forEach((decl: any) => {
                     const value = decl.init ? this.evaluate(decl.init, scope) : undefined;
                     scope[decl.id.name] = value;
+                    metadata[decl.id.name] = {
+                        kind: node.kind,
+                        label: this.getLabel(value)
+                    };
                     this.log(`Declared ${decl.id.name} = ${JSON.stringify(value)}`);
                 });
                 break;
@@ -192,6 +293,12 @@ export class JSInterpreter {
         }
     }
 
+    private getLabel(value: any): string | undefined {
+        if (value && value.__selector) return `class/id: ${value.__selector}`;
+        if (value && value instanceof Array) return `List [${value.length}]`;
+        return undefined;
+    }
+
     private evaluate(node: any, scope: Scope): any {
         if (!node) return undefined;
 
@@ -207,39 +314,35 @@ export class JSInterpreter {
                                 const el = this.previewWindow.document.getElementById(id);
                                 if (el) {
                                     this.log(`Selected element with id: ${id}`);
-                                    // Return a proxy to handle addEventListener
-                                    return new Proxy(el, {
-                                        get: (target: any, prop: string) => {
-                                            if (prop === 'addEventListener') {
-                                                return (type: string, callback: any) => {
-                                                    this.log(`Added ${type} listener`);
-                                                    target.addEventListener(type, () => {
-                                                        this.log(`Triggered ${type} event`);
-                                                        // When clicked, we want to START executing the callback
-                                                        this.callFunction(callback, []);
-                                                        // Notify UI that a new frame is pushed
-                                                        if (this.onStepCallback) this.onStepCallback(this.state);
-                                                    });
-                                                };
-                                            }
-                                            const val = target[prop];
-                                            return typeof val === 'function' ? val.bind(target) : val;
-                                        },
-                                        set: (target: any, prop: string, value: any) => {
-                                            target[prop] = value;
-                                            return true;
-                                        }
-                                    });
+                                    return this.createDOMProxy(el, `#${id}`);
                                 }
                             }
                             this.log(`Element with id ${id} not found`);
                             return null;
+                        },
+                        querySelector: (selector: string) => {
+                            if (this.previewWindow) {
+                                const el = this.previewWindow.document.querySelector(selector);
+                                if (el) {
+                                    this.log(`Selected element: ${selector}`);
+                                    return this.createDOMProxy(el, selector);
+                                }
+                            }
+                            return null;
+                        },
+                        querySelectorAll: (selector: string) => {
+                            if (this.previewWindow) {
+                                const elements = Array.from(this.previewWindow.document.querySelectorAll(selector));
+                                const proxied = elements.map(el => this.createDOMProxy(el, selector));
+                                (proxied as any).__selector = selector;
+                                return proxied;
+                            }
+                            return [];
                         }
                     };
                 }
                 if (node.name in scope) return scope[node.name];
                 if (node.name in this.state.globals) return this.state.globals[node.name];
-                // Handle global window properties if preview is available
                 if (this.previewWindow && node.name in this.previewWindow) {
                     const val = (this.previewWindow as any)[node.name];
                     return typeof val === 'function' ? val.bind(this.previewWindow) : val;
@@ -331,23 +434,49 @@ export class JSInterpreter {
         }
     }
 
+    private createDOMProxy(el: any, selector: string) {
+        return new Proxy(el, {
+            get: (target: any, prop: string) => {
+                if (prop === '__selector') return selector;
+                if (prop === 'addEventListener') {
+                    return (type: string, callback: any) => {
+                        target.addEventListener(type, () => {
+                            this.log(`Triggered ${type} event on ${selector}`);
+                            this.callFunction(callback, []);
+                            if (this.onStepCallback) this.onStepCallback(this.state);
+                        });
+                    };
+                }
+                const val = target[prop];
+                return typeof val === 'function' ? val.bind(target) : val;
+            },
+            set: (target: any, prop: string, value: any) => {
+                target[prop] = value;
+                return true;
+            }
+        });
+    }
+
     private callFunction(fnNode: any, args: any[]) {
         this.log(`Calling ${fnNode.id?.name || '(anonymous function)'}(${args.join(', ')})`);
         const functionScope: Scope = { ...this.state.globals };
+        const functionMetadata: Record<string, VariableMetadata> = {};
+
         fnNode.params.forEach((param: any, i: number) => {
             if (param.type === 'Identifier') {
                 functionScope[param.name] = args[i];
+                functionMetadata[param.name] = { kind: 'var' };
             }
         });
 
         this.state.stack.push({
             scope: functionScope,
+            metadata: functionMetadata,
             nodeQueue: [fnNode.body],
             isFunction: true,
             functionName: fnNode.id?.name
         });
 
-        // Reset finished state if we were finished
         this.state.isFinished = false;
     }
 

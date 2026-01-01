@@ -164,8 +164,45 @@ button.secondary:hover {
   background: rgba(255, 255, 255, 0.2);
 }
 
+.explanation-box {
+  margin: 0.5rem 1rem;
+  padding: 0.75rem 1rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 0.5rem;
+  border-left: 4px solid var(--accent-color);
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  animation: slideIn 0.3s ease-out;
+}
+
+.explanation-icon {
+  font-size: 1.2rem;
+}
+
+#explanation-text {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: #e0e0e0;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .inspector {
   grid-row: span 2;
+  height: calc(100vh - 100px);
+  /* Fill most of the screen */
 }
 
 .inspector-content {
@@ -174,6 +211,8 @@ button.secondary:hover {
   overflow-y: auto;
   font-family: 'Fira Code', monospace;
   font-size: 0.875rem;
+  min-height: 0;
+  /* Important for flex-basis scrolling */
 }
 
 .scope-item {
